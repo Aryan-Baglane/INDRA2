@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <application
+        android:name=".IndraApp"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true">
+
+        <!-- Mappls Keys -->
+<!--        <meta-data-->
+<!--            android:name="com.mapmyindia.clientId"-->
+<!--            android:value="96dHZVzsAuvVn1KTBE0-3au77pdoTyidrJTzShtvahN6Wq7MGxqujz4LMPVXi1K5kyvUQQc3v47_BY0rsYkZ0nSzuZvcLSym" />-->
+
+<!--        <meta-data-->
+<!--            android:name="com.mapmyindia.clientSecret"-->
+<!--            android:value="lrFxI-iSEg-3Nun-kFHH8GGv0TiTAeBsMldv8lzUtkjlS9N5lAzBtOUrVBzxxLYW3OSJ1xKY77Ssf4wurPthzj6bZI5PLc3VwC-qSqdbCCQ=" />-->
+
+<!--        <meta-data-->
+<!--            android:name="com.mapmyindia.restAPIKey"-->
+<!--            android:value="15458c6f980d6380abc5735d8854ff2d" />-->
+
+        <meta-data
+            android:name="com.mappls.sdk.maps.API_KEY"
+            android:value="dcacc0412f79b00254444a1f804d59b5" />
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.INDRA">
+
+        <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+
