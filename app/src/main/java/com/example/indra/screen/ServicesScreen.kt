@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.example.indra.data.ChatMessage
+import com.example.indra.data.ChatbotRepositoryProvider
 import com.example.indra.data.Sender
 import com.example.indra.ui.theme.ChatMessageItem
 import kotlinx.coroutines.launch
@@ -66,8 +67,11 @@ fun ServicesScreen(
 ) {
     var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
     var userInput by remember { mutableStateOf(TextFieldValue("")) }
+    var isSending by remember { mutableStateOf(false) }
+    var lastQuestion by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -99,24 +103,59 @@ fun ServicesScreen(
                 // )
             )
         },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         bottomBar = {
             ChatInputBar(
                 userInput = userInput,
                 onUserInputChanged = { userInput = it },
+                isSending = isSending,
                 onSendClicked = {
                     if (userInput.text.isNotBlank()) {
+                        if (isSending) return@ChatInputBar
                         val newUserMessage = ChatMessage(text = userInput.text, sender = Sender.USER)
                         messages = messages + newUserMessage
+                        lastQuestion = userInput.text
                         userInput = TextFieldValue("")
                         keyboardController?.hide()
                         focusManager.clearFocus()
 
                         scope.launch {
+                            isSending = true
                             listState.animateScrollToItem(messages.size - 1)
-                            kotlinx.coroutines.delay(1000)
-                            val botResponse = generateBotResponse(newUserMessage.text)
-                            messages = messages + botResponse
+                            val typingMessage = ChatMessage(text = "…", sender = Sender.BOT)
+                            val typingId = typingMessage.id
+                            messages = messages + typingMessage
                             listState.animateScrollToItem(messages.size - 1)
+
+                            suspend fun performAsk(question: String) {
+                                val result = ChatbotRepositoryProvider.repository().ask(question)
+                                result.onSuccess { reply ->
+                                    messages = messages.map { if (it.id == typingId) it.copy(text = reply) else it }
+                                    listState.animateScrollToItem(messages.size - 1)
+                                    isSending = false
+                                }.onFailure { throwable ->
+                                    val errorMsg = when {
+                                        throwable.message?.contains("404") == true -> "Server endpoint not found. Please check if the server is running."
+                                        throwable.message?.contains("500") == true -> "Server error. Please try again later."
+                                        throwable.message?.contains("timeout") == true -> "Request timed out. Please check your connection."
+                                        else -> "Error: ${throwable.message ?: "Unknown error"}"
+                                    }
+                                    messages = messages.map { if (it.id == typingId) it.copy(text = errorMsg) else it }
+                                    isSending = false
+                                    val res = snackbarHostState.showSnackbar(
+                                        message = errorMsg,
+                                        actionLabel = "Retry",
+                                        withDismissAction = true
+                                    )
+                                    if (res == SnackbarResult.ActionPerformed) {
+                                        isSending = true
+                                        messages = messages.map { if (it.id == typingId) it.copy(text = "…") else it }
+                                        performAsk(question)
+                                    }
+                                }
+                            }
+
+                            performAsk(newUserMessage.text)
                         }
                     }
                 }
@@ -160,6 +199,7 @@ fun ServicesScreen(
 fun ChatInputBar(
     userInput: TextFieldValue,
     onUserInputChanged: (TextFieldValue) -> Unit,
+    isSending: Boolean,
     onSendClicked: () -> Unit
 ) {
     Surface(
@@ -206,35 +246,31 @@ fun ChatInputBar(
 
             IconButton(
                 onClick = onSendClicked,
-                enabled = userInput.text.isNotBlank(),
+                enabled = userInput.text.isNotBlank() && !isSending,
                 modifier = Modifier
                     .padding(start = 8.dp)
                     .size(48.dp)
                     .clip(CircleShape)
                     .background(
-                        if (userInput.text.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(
+                        if (userInput.text.isNotBlank() && !isSending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(
                             alpha = 0.12f
                         )
                     )
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Send,
-                    contentDescription = "Send Message",
-                    tint = if (userInput.text.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                )
+                if (isSending) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Send,
+                        contentDescription = "Send Message",
+                        tint = if (userInput.text.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    )
+                }
             }
         }
     }
-}
-
-
-// Dummy Bot Response Logic (Keep this separate)
-fun generateBotResponse(userInput: String): ChatMessage {
-    val responseText = when {
-        userInput.contains("hello", ignoreCase = true) -> "Hi there! How can I assist?"
-        userInput.contains("help", ignoreCase = true) -> "Sure, I can help. What do you need assistance with regarding our services?"
-        userInput.contains("bye", ignoreCase = true) -> "Goodbye! Have a great day."
-        else -> "I'm sorry, I didn't quite understand that. Could you please rephrase?"
-    }
-    return ChatMessage(text = responseText, sender = Sender.BOT)
 }
