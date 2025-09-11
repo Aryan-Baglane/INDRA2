@@ -12,6 +12,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavController
+import com.example.indra.navigation.AppRoutes
 import com.example.indra.i18n.LocaleManager
 import com.example.indra.ui.theme.ThemeManager
 
@@ -19,6 +22,8 @@ import com.example.indra.ui.theme.ThemeManager
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen() {
+    val activity = LocalContext.current as android.app.Activity
+    val navController = (activity as? com.example.indra.MainActivity)?.let { null }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -39,6 +44,16 @@ fun SettingsScreen() {
                 subtitle = "Manage your account information",
                 icon = Icons.Default.Person
             )
+        }
+
+        item {
+            Button(onClick = {
+                // Navigate to onboarding to edit details
+                // Settings screen is inside MainActivity NavHost; we can use a simple event bus or
+                // provide a callback. For simplicity, we expose a static route by emitting a navigation event.
+                // In this context, use a side effect to request navigation via a global singleton.
+                com.example.indra.screen.SettingsNavDispatcher.navigateToOnboarding()
+            }) { Text("Edit Onboarding Details") }
         }
 
         // --- Notifications ---

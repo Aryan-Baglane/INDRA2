@@ -42,11 +42,13 @@ import com.example.indra.data.Report
 import com.example.indra.i18n.LocaleManager
 import com.example.indra.navigation.AppDestination
 import com.example.indra.navigation.AppRoutes
+import com.example.indra.db.DatabaseProvider
 import com.example.indra.platform.PlatformSignIn
 import com.example.indra.screen.*
 import com.example.indra.ui.theme.INDRATheme
 import com.example.indra.ui.theme.ThemeManager
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : ComponentActivity() {
     override fun attachBaseContext(newBase: Context) {
@@ -93,6 +95,7 @@ fun App(onGoogleSignIn: () -> Unit) {
         var isAuthChecked by remember { mutableStateOf(false) }
         var isSignedIn by remember { mutableStateOf(false) }
         var playLoginAnim by remember { mutableStateOf(false) }
+        var needsOnboarding by remember { mutableStateOf(false) }
 
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -102,7 +105,16 @@ fun App(onGoogleSignIn: () -> Unit) {
         var reportData by remember { mutableStateOf<Report?>(null) }
 
         LaunchedEffect(Unit) {
-            isSignedIn = AuthApi.currentUser() != null
+            val user = AuthApi.currentUser()
+            isSignedIn = user != null
+            if (user != null) {
+                try {
+                    val profile = DatabaseProvider.database().getUserProfile(user.uid)
+                    needsOnboarding = profile?.onboardingCompleted != true
+                } catch (_: Exception) {
+                    needsOnboarding = true
+                }
+            }
             isAuthChecked = true
             PlatformSignIn.setCallback { success, error ->
                 if (success) {
@@ -116,6 +128,14 @@ fun App(onGoogleSignIn: () -> Unit) {
         val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
         val scope = rememberCoroutineScope()
 
+        // Listen for settings navigation events to open onboarding for editing
+        LaunchedEffect(Unit) {
+            SettingsNavDispatcher.events.collectLatest {
+                // Navigate to onboarding without changing needsOnboarding flag
+                navController.navigate(AppRoutes.ONBOARDING)
+            }
+        }
+
         if (!isAuthChecked || !isSignedIn) {
             AuthScreen(
                 onSignedIn = { playLoginAnim = true },
@@ -126,9 +146,18 @@ fun App(onGoogleSignIn: () -> Unit) {
                     onFinished = {
                         playLoginAnim = false
                         isSignedIn = true
-                        navController.navigate(AppRoutes.DASHBOARD) {
-                            popUpTo(AppRoutes.DASHBOARD) {
-                                inclusive = true
+                        // After login, determine onboarding state then navigate
+                        scope.launch {
+                            val user = AuthApi.currentUser()
+                            val goOnboarding = if (user != null) {
+                                try {
+                                    val profile = DatabaseProvider.database().getUserProfile(user.uid)
+                                    profile?.onboardingCompleted != true
+                                } catch (_: Exception) { true }
+                            } else false
+                            needsOnboarding = goOnboarding
+                            navController.navigate(if (goOnboarding) AppRoutes.ONBOARDING else AppRoutes.DASHBOARD) {
+                                popUpTo(AppRoutes.DASHBOARD) { inclusive = true }
                             }
                         }
                     }
@@ -333,7 +362,16 @@ fun App(onGoogleSignIn: () -> Unit) {
                 }
             ) { padding ->
                 Box(Modifier.fillMaxSize().padding(padding)) {
-                    NavHost(navController = navController, startDestination = AppRoutes.DASHBOARD) {
+                    val startDest = if (needsOnboarding) AppRoutes.ONBOARDING else AppRoutes.DASHBOARD
+                    NavHost(navController = navController, startDestination = startDest) {
+                        composable(AppRoutes.ONBOARDING) {
+                            OnboardingScreen(onCompleted = {
+                                needsOnboarding = false
+                                navController.navigate(AppRoutes.DASHBOARD) {
+                                    popUpTo(AppRoutes.ONBOARDING) { inclusive = true }
+                                }
+                            })
+                        }
                         composable(AppRoutes.DASHBOARD) {
                             DashboardScreen(onStartAssessment = {
                                 navController.navigate(AppRoutes.ASSESS)

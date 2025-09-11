@@ -45,6 +45,12 @@ import com.example.indra.R.drawable.hand_drawn_water_drop_cartoon_illustration
 @Composable
 fun DashboardScreen(onStartAssessment: () -> Unit) {
     var currentLocation by remember { mutableStateOf("Fetching location...") }
+    var latitude by remember { mutableStateOf<Double?>(null) }
+    var longitude by remember { mutableStateOf<Double?>(null) }
+    var feasibilityScore by remember { mutableStateOf<Double?>(null) }
+    var potentialRunoff by remember { mutableStateOf<Double?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val fusedClient = remember { LocationServices.getFusedLocationProviderClient(context) }
     val scope = rememberCoroutineScope()
@@ -55,8 +61,10 @@ fun DashboardScreen(onStartAssessment: () -> Unit) {
             if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
             ) {
-                fetchLocation(context, fusedClient) { addr ->
+                fetchLocationFull(context, fusedClient) { addr, lat, lon ->
                     currentLocation = addr ?: "Unable to fetch location"
+                    latitude = lat
+                    longitude = lon
                 }
             } else {
                 currentLocation = "Permission denied"
@@ -71,6 +79,46 @@ fun DashboardScreen(onStartAssessment: () -> Unit) {
                 Manifest.permission.ACCESS_COARSE_LOCATION
             )
         )
+    }
+
+    LaunchedEffect(latitude, longitude) {
+        val lat = latitude
+        val lon = longitude
+        if (lat != null && lon != null) {
+            isLoading = true
+            error = null
+            scope.launch {
+                try {
+                    // Fetch onboarding profile
+                    val user = com.example.indra.auth.AuthApi.currentUser()
+                    val uid = user?.uid
+                    if (uid != null) {
+                        val profile = com.example.indra.db.DatabaseProvider.database().getUserProfile(uid)
+                        if (profile != null && profile.onboardingCompleted) {
+                            val request = com.example.indra.data.AssessmentRequest(
+                                name = profile.displayName ?: "Home",
+                                latitude = lat,
+                                longitude = lon,
+                                numDwellers = profile.numDwellers,
+                                roofAreaSqm = profile.roofAreaSqm,
+                                openSpaceSqm = profile.openSpaceSqm,
+                                roofType = profile.roofType
+                            )
+                            val repo = com.example.indra.data.AssessmentRepositoryProvider.repository()
+                            val result = repo.performAssessment(request)
+                            result.onSuccess { resp ->
+                                feasibilityScore = resp.feasibilityScore
+                                potentialRunoff = resp.rwhAnalysis.potentialAnnualRunoffLiters
+                            }.onFailure { e -> error = e.message }
+                        }
+                    }
+                } catch (e: Exception) {
+                    error = e.message
+                } finally {
+                    isLoading = false
+                }
+            }
+        }
     }
 
     Surface(
@@ -99,8 +147,11 @@ fun DashboardScreen(onStartAssessment: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(12.dp))
-            AnimatedEntrance(delayMillis = 120) { Metrics(currentLocation = currentLocation) }
-            AnimatedEntrance(delayMillis = 240) { HarvestingPotential() }
+            if (error != null) {
+                Text(error!!, color = MaterialTheme.colorScheme.error)
+            }
+            AnimatedEntrance(delayMillis = 120) { Metrics(currentLocation = currentLocation, score = feasibilityScore, loading = isLoading) }
+            AnimatedEntrance(delayMillis = 240) { HarvestingPotential(potentialRunoff) }
             AnimatedEntrance(delayMillis = 360) { Recommandation() }
             AnimatedEntrance(delayMillis = 480) { StartNewAssessmentCard(onClick = onStartAssessment) }
         }
@@ -132,7 +183,7 @@ fun AnimatedEntrance(
 }
 
 @Composable
-fun Metrics(currentLocation: String = "Current Location") {
+fun Metrics(currentLocation: String = "Current Location", score: Double? = null, loading: Boolean = false) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -157,7 +208,7 @@ fun Metrics(currentLocation: String = "Current Location") {
                 fontSize = 22.sp
             )
             Spacer(Modifier.height(10.dp))
-            ProgressAnimated()
+            ProgressAnimated(target = if (score != null) (score / 100.0).toFloat().coerceIn(0f,1f) else null, loading = loading)
         }
     }
 }
@@ -180,9 +231,9 @@ fun LocationChip(location: String) {
 }
 
 @Composable
-fun ProgressAnimated() {
+fun ProgressAnimated(target: Float? = null, loading: Boolean = false) {
     var progressTarget by remember { mutableStateOf(0f) }
-    LaunchedEffect(Unit) { progressTarget = 0.85f }
+    LaunchedEffect(target) { progressTarget = target ?: if (loading) 0f else 0.0f }
     val animatedProgress by animateFloatAsState(
         targetValue = progressTarget,
         animationSpec = tween(1500, easing = LinearOutSlowInEasing),
@@ -199,7 +250,7 @@ fun ProgressAnimated() {
             trackColor = Color(0xFFB3E5FC).copy(alpha = 0.7f),
         )
         Text(
-            "$animatedPercentage%",
+            "${if (target == null && loading) "..." else "$animatedPercentage%"}",
             style = MaterialTheme.typography.headlineMedium,
             color = Color(0xFF0288D1),
             fontWeight = FontWeight.Bold,
@@ -209,7 +260,7 @@ fun ProgressAnimated() {
 }
 
 @Composable
-fun HarvestingPotential() {
+fun HarvestingPotential(potentialRunoffLiters: Double? = null) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -244,7 +295,10 @@ fun HarvestingPotential() {
                 )
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
-                    "150000 liters",
+                    text = potentialRunoffLiters?.let {
+                        val v = it.toLong()
+                        "${String.format(Locale.getDefault(), "%,d", v)} liters"
+                    } ?: "Calculating...",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF0288D1)
@@ -378,6 +432,39 @@ private fun fetchLocation(
         }
         .addOnFailureListener {
             callback(null)
+        }
+}
+
+@SuppressLint("MissingPermission")
+private fun fetchLocationFull(
+    context: Context,
+    fusedClient: FusedLocationProviderClient,
+    callback: (String?, Double?, Double?) -> Unit
+) {
+    fusedClient.lastLocation
+        .addOnSuccessListener { location: Location? ->
+            if (location != null) {
+                callback(location.toAddress(context), location.latitude, location.longitude)
+            } else {
+                val request = LocationRequest.Builder(
+                    Priority.PRIORITY_HIGH_ACCURACY, 1000
+                ).setMaxUpdates(1).build()
+
+                fusedClient.requestLocationUpdates(
+                    request,
+                    object : LocationCallback() {
+                        override fun onLocationResult(result: LocationResult) {
+                            val loc = result.lastLocation
+                            callback(loc?.toAddress(context), loc?.latitude, loc?.longitude)
+                            fusedClient.removeLocationUpdates(this)
+                        }
+                    },
+                    null
+                )
+            }
+        }
+        .addOnFailureListener {
+            callback(null, null, null)
         }
 }
 

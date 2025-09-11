@@ -29,6 +29,7 @@ import com.example.indra.screen.SettingsScreen
 // Define routes as constants for type safety and clarity.
 object AppRoutes {
     const val DASHBOARD = "dashboard"
+    const val ONBOARDING = "onboarding"
     const val ASSESS = "assess"
     const val COMMUNITY = "community"
     const val SERVICES = "Jal Sanchay Mitra"
